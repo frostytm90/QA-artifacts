@@ -1,0 +1,96 @@
+# Docker Compose for Test Automation
+#
+# This demonstrates the multi-container test environment
+# I configured for local development and CI/CD.
+
+version: "3.9"
+
+services:
+  # Test runner service
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: test-runner
+    environment:
+      - API_BASE_URL=http://api:8080
+      - SELENIUM_HUB_URL=http://selenium-hub:4444/wd/hub
+      - ALLURE_RESULTS_DIR=/app/allure-results
+    volumes:
+      - ./tests:/app/tests:ro
+      - ./allure-results:/app/allure-results
+      - ./screenshots:/app/screenshots
+    depends_on:
+      - selenium-hub
+    networks:
+      - test-network
+    command: >
+      pytest tests/
+      --alluredir=/app/allure-results
+      -v
+      --tb=short
+
+  # Selenium Grid Hub
+  selenium-hub:
+    image: selenium/hub:4.15
+    container_name: selenium-hub
+    ports:
+      - "4444:4444"
+    environment:
+      - GRID_MAX_SESSION=10
+      - GRID_TIMEOUT=300
+    networks:
+      - test-network
+
+  # Chrome node for parallel execution
+  chrome-node:
+    image: selenium/node-chrome:4.15
+    container_name: chrome-node
+    shm_size: "2gb"
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+      - SE_NODE_MAX_SESSIONS=4
+    depends_on:
+      - selenium-hub
+    networks:
+      - test-network
+
+  # Firefox node for cross-browser testing
+  firefox-node:
+    image: selenium/node-firefox:4.15
+    container_name: firefox-node
+    shm_size: "2gb"
+    environment:
+      - SE_EVENT_BUS_HOST=selenium-hub
+      - SE_EVENT_BUS_PUBLISH_PORT=4442
+      - SE_EVENT_BUS_SUBSCRIBE_PORT=4443
+      - SE_NODE_MAX_SESSIONS=4
+    depends_on:
+      - selenium-hub
+    networks:
+      - test-network
+
+  # Allure report server
+  allure:
+    image: frankescobar/allure-docker-service:latest
+    container_name: allure-service
+    ports:
+      - "5050:5050"
+    environment:
+      - CHECK_RESULTS_EVERY_SECONDS=3
+      - KEEP_HISTORY=25
+    volumes:
+      - ./allure-results:/app/allure-results
+      - ./allure-reports:/app/default-reports
+    networks:
+      - test-network
+
+networks:
+  test-network:
+    driver: bridge
+
+volumes:
+  allure-results:
+  allure-reports:
